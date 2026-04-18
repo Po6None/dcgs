@@ -1,6 +1,6 @@
 # DCGS
 
-This repository provides a clean and runnable C++17 implementation of DCGS and the main baseline methods used in our experiments, including the `pilot_peeling_cap` ablation baseline.
+This repository provides a clean and runnable C++17 implementation of DCGS and the main baseline methods used in our experiments.
 
 ## 1) What is included
 
@@ -48,12 +48,6 @@ Run DCGS on the included hamsterster example (LT + peeling):
 
 ```bash
 ./dcgs --graph dataset/hamsterster/graph.dcgsbin --seeds dataset/hamsterster/seeds_top_outdeg_10.txt --algorithm dcgs --subproblem_solver peeling --model lt --lt_w_rule c_over_indeg --c 0.5 --tau 0.2 --eps 0.5 --delta 0.001 --gamma 0.0001 --rng_seed 1 --trials 1 --eval_cap 10000 --out result/output_u_hat.txt --log result/output_log.txt --trace_csv result/output_trace.csv --trace_json result/output_trace.json --progress
-```
-
-Run the `pilot_peeling_cap` ablation baseline on the same graph:
-
-```bash
-./dcgs --graph dataset/hamsterster/graph.dcgsbin --seeds dataset/hamsterster/seeds_top_outdeg_10.txt --algorithm pilot_peeling_cap --model lt --lt_w_rule c_over_indeg --c 0.5 --tau 0.2 --eps 0.5 --delta 0.001 --gamma 0.0001 --sample_cap 10000 --eval_cap 10000 --rng_seed 1 --trials 1 --out result/output_u_hat.txt --log result/output_log.txt --trace_csv result/output_trace.csv --trace_json result/output_trace.json --progress
 ```
 
 Show all available CLI options:
