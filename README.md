@@ -1,6 +1,6 @@
 # DCGS
 
-This repository provides a clean and runnable C++17 implementation of DCGS and the main baseline methods used in our experiments.
+This repository provides a clean and runnable C++17 implementation of DCGS and the main baseline methods used in our experiments, including the `pilot_peeling_cap` ablation baseline.
 
 ## 1) What is included
 
@@ -50,6 +50,12 @@ Run DCGS on the included hamsterster example (LT + peeling):
 ./dcgs --graph dataset/hamsterster/graph.dcgsbin --seeds dataset/hamsterster/seeds_top_outdeg_10.txt --algorithm dcgs --subproblem_solver peeling --model lt --lt_w_rule c_over_indeg --c 0.5 --tau 0.2 --eps 0.5 --delta 0.001 --gamma 0.0001 --rng_seed 1 --trials 1 --eval_cap 10000 --out result/output_u_hat.txt --log result/output_log.txt --trace_csv result/output_trace.csv --trace_json result/output_trace.json --progress
 ```
 
+Run the `pilot_peeling_cap` ablation baseline on the same graph:
+
+```bash
+./dcgs --graph dataset/hamsterster/graph.dcgsbin --seeds dataset/hamsterster/seeds_top_outdeg_10.txt --algorithm pilot_peeling_cap --model lt --lt_w_rule c_over_indeg --c 0.5 --tau 0.2 --eps 0.5 --delta 0.001 --gamma 0.0001 --sample_cap 10000 --eval_cap 10000 --rng_seed 1 --trials 1 --out result/output_u_hat.txt --log result/output_log.txt --trace_csv result/output_trace.csv --trace_json result/output_trace.json --progress
+```
+
 Show all available CLI options:
 
 ```bash
@@ -63,7 +69,7 @@ Show all available CLI options:
 | `--graph` | `string` (path) | Required | Input graph file (`.txt` or `.dcgsbin`) |
 | `--seeds` | `string` (path) | Required | Seed node file (one node id per line) |
 | `--undirected` | flag (`bool`) | `false` | Treat text input as undirected (insert both directions) |
-| `--algorithm` | enum (`string`) | `dcgs` | `dcgs`, `best_pair`, `topk_activation_prob`, `topk_coactivation_degree`, `greedy_add`, `local_search`, `structure_peeling`, `edge_coact_peeling`, `certified_cap_no_early_stop` |
+| `--algorithm` | enum (`string`) | `dcgs` | `dcgs`, `best_pair`, `topk_activation_prob`, `topk_coactivation_degree`, `greedy_add`, `local_search`, `structure_peeling`, `edge_coact_peeling`, `certified_cap_no_early_stop`, `pilot_peeling_cap` |
 | `--subproblem_solver` | enum (`string`) | `peeling` | `peeling` or `exact` (used by `dcgs` and `certified_cap_no_early_stop`) |
 | `--model` | enum (`string`) | `ic` | `ic` or `lt` |
 | `--ic_p_rule` | enum (`string`) | `const` | `const`, `c_over_indeg`, `file` |

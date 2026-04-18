@@ -60,6 +60,8 @@ RuleKind ParseRule(const std::string& value, bool for_lt, bool* ok) {
 AlgorithmKind ParseAlgorithm(const std::string& value, bool* ok) {
   if (ok) *ok = true;
   if (value == "dcgs") return AlgorithmKind::kDcgs;
+  if (value == "pilot_greedy") return AlgorithmKind::kPilotGreedy;
+  if (value == "pilot_peeling_cap") return AlgorithmKind::kPilotPeelingCap;
   if (value == "best_pair") return AlgorithmKind::kBestPair;
   if (value == "topk_activation_prob") return AlgorithmKind::kTopKActivationProb;
   if (value == "topk_coactivation_degree") return AlgorithmKind::kTopKCoactivationDegree;
@@ -346,7 +348,9 @@ bool ValidateOptions(const RuntimeOptions& opts, std::string* err) {
     if (err) *err = "local_search_max_iters must be >= 1.";
     return false;
   }
-  if ((opts.algorithm == AlgorithmKind::kBestPair ||
+  if ((opts.algorithm == AlgorithmKind::kPilotGreedy ||
+       opts.algorithm == AlgorithmKind::kPilotPeelingCap ||
+       opts.algorithm == AlgorithmKind::kBestPair ||
        opts.algorithm == AlgorithmKind::kTopKActivationProb ||
        opts.algorithm == AlgorithmKind::kTopKCoactivationDegree ||
        opts.algorithm == AlgorithmKind::kGreedyAdd ||

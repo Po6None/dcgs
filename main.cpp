@@ -13,7 +13,7 @@ void PrintUsage() {
       << "Usage:\n"
       << "  ./dcgs --graph <path> --seeds <path> [options]\n\n"
       << "Core options:\n"
-      << "  --algorithm dcgs|best_pair|topk_activation_prob|topk_coactivation_degree|\n"
+      << "  --algorithm dcgs|pilot_greedy|pilot_peeling_cap|best_pair|topk_activation_prob|topk_coactivation_degree|\n"
       << "              greedy_add|local_search|structure_peeling|\n"
       << "              edge_coact_peeling|certified_cap_no_early_stop\n"
       << "  --subproblem_solver peeling|exact\n"

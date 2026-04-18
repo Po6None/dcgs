@@ -37,6 +37,9 @@ const char* AlgorithmFamilyName(AlgorithmKind algorithm) {
   switch (algorithm) {
     case AlgorithmKind::kDcgs:
       return "dcgs";
+    case AlgorithmKind::kPilotGreedy:
+    case AlgorithmKind::kPilotPeelingCap:
+      return "pilot_ablation";
     case AlgorithmKind::kBestPair:
     case AlgorithmKind::kTopKActivationProb:
     case AlgorithmKind::kTopKCoactivationDegree:
@@ -57,6 +60,8 @@ const char* AlgorithmFamilyName(AlgorithmKind algorithm) {
 // tracked-edge statistics in a meaningful way.
 bool UsesPilot(AlgorithmKind algorithm) {
   return algorithm == AlgorithmKind::kDcgs ||
+         algorithm == AlgorithmKind::kPilotGreedy ||
+         algorithm == AlgorithmKind::kPilotPeelingCap ||
          algorithm == AlgorithmKind::kCertifiedCapNoEarlyStop;
 }
 

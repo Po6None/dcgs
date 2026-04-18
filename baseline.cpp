@@ -58,6 +58,18 @@ void AdvanceSeedEpoch(BaselineWorkspace* workspace) {
   ++workspace->seed_epoch;
 }
 
+// Candidate membership for pilot_greedy uses the same epoch trick as seeds so
+// repeated trials avoid O(n) clears of a dense mark array.
+void AdvanceCandidateEpoch(BaselineWorkspace* workspace) {
+  if (!workspace) return;
+  if (workspace->candidate_epoch == std::numeric_limits<std::uint32_t>::max()) {
+    std::fill(workspace->candidate_mark.begin(), workspace->candidate_mark.end(), 0);
+    workspace->candidate_epoch = 1;
+    return;
+  }
+  ++workspace->candidate_epoch;
+}
+
 void ResetWorkspace(const Graph& graph,
                     const std::vector<NodeId>& seeds,
                     BaselineWorkspace* workspace) {
@@ -331,6 +343,18 @@ std::vector<NodeId> FallbackSingleNode(NodeCount num_nodes,
   return {};
 }
 
+// FallbackCandidateSingleNode keeps pilot_greedy inside the pilot candidate
+// scope when no positive sampled pair survives thresholding.
+std::vector<NodeId> FallbackCandidateSingleNode(
+    const std::vector<NodeId>& candidate_nodes,
+    const std::vector<std::uint32_t>& seed_mark,
+    std::uint32_t seed_epoch) {
+  for (NodeId node : candidate_nodes) {
+    if (node < seed_mark.size() && seed_mark[node] != seed_epoch) return {node};
+  }
+  return {};
+}
+
 void FinalizeSampleBudgetBaselineResult(const RuntimeOptions& opts,
                                         Real start,
                                         DcgsResult* result) {
@@ -417,6 +441,41 @@ void FilterNonSeedActivated(const std::vector<NodeId>& activated,
   }
 }
 
+// MarkPilotCandidateSet records the candidate-node membership used by the
+// pilot_greedy ablation in an epoch-marked dense array.
+void MarkPilotCandidateSet(const Graph& graph,
+                           const std::vector<NodeId>& candidate_nodes,
+                           BaselineWorkspace* workspace) {
+  if (!workspace) return;
+  const std::size_t n = static_cast<std::size_t>(graph.num_nodes);
+  if (workspace->candidate_mark.size() != n) {
+    workspace->candidate_mark.assign(n, 0);
+    workspace->candidate_epoch = 1;
+  } else {
+    AdvanceCandidateEpoch(workspace);
+  }
+  for (NodeId node : candidate_nodes) {
+    if (node < graph.num_nodes) {
+      workspace->candidate_mark[node] = workspace->candidate_epoch;
+    }
+  }
+}
+
+// FilterPilotCandidateActivated keeps only activated nodes that are both
+// non-seeds and members of the pilot candidate set.
+void FilterPilotCandidateActivated(const std::vector<NodeId>& activated,
+                                   BaselineWorkspace* workspace) {
+  if (!workspace) return;
+  workspace->filtered_active_nodes.clear();
+  workspace->filtered_active_nodes.reserve(activated.size());
+  for (NodeId node : activated) {
+    if (workspace->seed_mark[node] == workspace->seed_epoch) continue;
+    if (workspace->candidate_mark[node] == workspace->candidate_epoch) {
+      workspace->filtered_active_nodes.push_back(node);
+    }
+  }
+}
+
 // UpdateActivationCounts tracks how often each non-seed node activates across samples.
 void UpdateActivationCounts(BaselineWorkspace* workspace) {
   if (!workspace) return;
@@ -466,6 +525,29 @@ void RunSamplingPass(const Graph& graph,
         SimulateDiffusion(graph, seeds, opts, &workspace->diffusion_workspace, rng);
     FilterNonSeedActivated(activated, workspace);
     if (record_activation_counts) UpdateActivationCounts(workspace);
+    EmitFilteredPairsToBuffers(workspace, chunk_capacity_keys);
+  }
+
+  FlushChunk(workspace);
+  FinalizeRuns(workspace);
+}
+
+void RunSamplingPassOnPilotCandidates(const Graph& graph,
+                                      const std::vector<NodeId>& seeds,
+                                      SampleCount sample_cap,
+                                      const RuntimeOptions& opts,
+                                      const std::vector<NodeId>& candidate_nodes,
+                                      BaselineWorkspace* workspace,
+                                      std::mt19937_64* rng) {
+  if (!workspace) return;
+  const std::size_t chunk_capacity_keys = ChunkCapacityKeys(opts.baseline_chunk_bytes);
+  PrepareSamplingBuffers(chunk_capacity_keys, workspace);
+  MarkPilotCandidateSet(graph, candidate_nodes, workspace);
+
+  for (SampleCount t = 0; t < sample_cap; ++t) {
+    const std::vector<NodeId>& activated =
+        SimulateDiffusion(graph, seeds, opts, &workspace->diffusion_workspace, rng);
+    FilterPilotCandidateActivated(activated, workspace);
     EmitFilteredPairsToBuffers(workspace, chunk_capacity_keys);
   }
 
@@ -1046,6 +1128,185 @@ DcgsResult RunGreedyAddBaseline(const Graph& graph,
                                std::mt19937_64* rng) {
   BaselineWorkspace workspace;
   return RunGreedyAddBaseline(graph, seeds, opts, &workspace, rng);
+}
+
+DcgsResult RunPilotGreedyAblation(const Graph& graph,
+                                  const std::vector<NodeId>& seeds,
+                                  const std::vector<NodeId>& candidate_nodes,
+                                  const RuntimeOptions& opts,
+                                  BaselineWorkspace* workspace,
+                                  std::mt19937_64* rng) {
+  DcgsResult result;
+  const Real start = NowSeconds();
+
+  BaselineWorkspace local_workspace;
+  if (!workspace) workspace = &local_workspace;
+  ResetWorkspace(graph, seeds, workspace);
+
+  result.sample_cap_used = opts.sample_cap;
+  if (opts.sample_cap == 0) {
+    FinalizeSampleBudgetBaselineResult(opts, start, &result);
+    return result;
+  }
+
+  RunSamplingPassOnPilotCandidates(graph,
+                                   seeds,
+                                   opts.sample_cap,
+                                   opts,
+                                   candidate_nodes,
+                                   workspace,
+                                   rng);
+
+  NodeCount best_pair_u = 0;
+  NodeCount best_pair_v = 0;
+  Real best_pair_weight = 0.0;
+  if (!BuildThresholdedAdjacency(workspace,
+                                 opts.sample_cap,
+                                 opts.tau,
+                                 &best_pair_u,
+                                 &best_pair_v,
+                                 &best_pair_weight)) {
+    result.u_hat = FallbackCandidateSingleNode(
+        candidate_nodes, workspace->seed_mark, workspace->seed_epoch);
+    if (result.u_hat.empty()) {
+      result.u_hat = FallbackSingleNode(
+          graph.num_nodes, workspace->seed_mark, workspace->seed_epoch);
+    }
+    result.certified.rho_final = 0.0;
+  } else {
+    std::vector<NodeCount> selected_order;
+    selected_order.reserve(workspace->touched_activation_nodes.size());
+    selected_order.push_back(best_pair_u);
+    selected_order.push_back(best_pair_v);
+    InitializeGreedyState(best_pair_u, best_pair_v, best_pair_weight, workspace);
+
+    Real current_weight = best_pair_weight;
+    NodeCount current_size = 2;
+    Real current_rho = current_weight / static_cast<Real>(current_size);
+
+    while (true) {
+      NodeCount candidate = 0;
+      Real gain = 0.0;
+      if (!PopBestGain(&candidate, &gain, workspace)) break;
+      const Real candidate_rho =
+          (current_weight + gain) / static_cast<Real>(current_size + 1);
+      if (!(candidate_rho > current_rho)) break;
+
+      selected_order.push_back(candidate);
+      AddGreedyNode(candidate, workspace);
+      current_weight += gain;
+      ++current_size;
+      current_rho = candidate_rho;
+    }
+
+    result.u_hat.reserve(selected_order.size());
+    for (NodeCount local_node : selected_order) {
+      result.u_hat.push_back(
+          workspace->touched_activation_nodes[static_cast<std::size_t>(local_node)]);
+    }
+    result.certified.rho_final = current_rho;
+  }
+
+  FinalizeSampleBudgetBaselineResult(opts, start, &result);
+  return result;
+}
+
+DcgsResult RunPilotGreedyAblation(const Graph& graph,
+                                  const std::vector<NodeId>& seeds,
+                                  const std::vector<NodeId>& candidate_nodes,
+                                  const RuntimeOptions& opts,
+                                  std::mt19937_64* rng) {
+  BaselineWorkspace workspace;
+  return RunPilotGreedyAblation(graph, seeds, candidate_nodes, opts, &workspace, rng);
+}
+
+DcgsResult RunPilotPeelingCapAblation(const Graph& graph,
+                                      const std::vector<NodeId>& seeds,
+                                      const TrackedGraph& tracked_graph,
+                                      const RuntimeOptions& opts,
+                                      BaselineWorkspace* workspace,
+                                      std::mt19937_64* rng) {
+  DcgsResult result;
+  const Real start = NowSeconds();
+
+  BaselineWorkspace local_workspace;
+  if (!workspace) workspace = &local_workspace;
+  ResetWorkspace(graph, seeds, workspace);
+
+  result.sample_cap_used = opts.sample_cap;
+  if (opts.sample_cap == 0) {
+    FinalizeSampleBudgetBaselineResult(opts, start, &result);
+    return result;
+  }
+
+  const std::size_t tracked_edge_count =
+      static_cast<std::size_t>(TrackedEdgeCount(tracked_graph));
+  if (tracked_edge_count == 0) {
+    result.u_hat = FallbackCandidateSingleNode(
+        tracked_graph.local_to_global, workspace->seed_mark, workspace->seed_epoch);
+    if (result.u_hat.empty()) {
+      result.u_hat = FallbackSingleNode(
+          graph.num_nodes, workspace->seed_mark, workspace->seed_epoch);
+    }
+    result.certified.rho_final = 0.0;
+    FinalizeSampleBudgetBaselineResult(opts, start, &result);
+    return result;
+  }
+
+  MarkPilotCandidateSet(graph, tracked_graph.local_to_global, workspace);
+  workspace->edge_activation_counts.assign(tracked_edge_count, 0);
+  workspace->edge_weights.assign(tracked_edge_count, 0.0);
+
+  for (SampleCount t = 0; t < opts.sample_cap; ++t) {
+    const std::vector<NodeId>& activated =
+        SimulateDiffusion(graph, seeds, opts, &workspace->diffusion_workspace, rng);
+
+    for (NodeId node : activated) {
+      if (workspace->seed_mark[node] == workspace->seed_epoch) continue;
+      if (workspace->candidate_mark[node] != workspace->candidate_epoch) continue;
+      if (workspace->active_mark[node]) continue;
+      workspace->active_mark[node] = 1;
+      workspace->touched_active_nodes.push_back(node);
+    }
+
+    for (std::size_t edge_index = 0; edge_index < tracked_edge_count; ++edge_index) {
+      const NodeCount local_u = tracked_graph.edge_u[edge_index];
+      const NodeCount local_v = tracked_graph.edge_v[edge_index];
+      const NodeId global_u = tracked_graph.local_to_global[static_cast<std::size_t>(local_u)];
+      const NodeId global_v = tracked_graph.local_to_global[static_cast<std::size_t>(local_v)];
+      if (workspace->active_mark[global_u] && workspace->active_mark[global_v]) {
+        ++workspace->edge_activation_counts[edge_index];
+      }
+    }
+
+    for (NodeId node : workspace->touched_active_nodes) {
+      workspace->active_mark[node] = 0;
+    }
+    workspace->touched_active_nodes.clear();
+  }
+
+  for (std::size_t edge_index = 0; edge_index < tracked_edge_count; ++edge_index) {
+    const Real p_hat = static_cast<Real>(workspace->edge_activation_counts[edge_index]) /
+                       static_cast<Real>(opts.sample_cap);
+    workspace->edge_weights[edge_index] = (p_hat >= opts.tau) ? p_hat : 0.0;
+  }
+
+  const PeelingResult peel =
+      WeightedPeeling(tracked_graph, workspace->edge_weights, &workspace->peeling_workspace);
+  result.u_hat = peel.u_max;
+  result.certified.rho_final = peel.rho_max;
+  FinalizeSampleBudgetBaselineResult(opts, start, &result);
+  return result;
+}
+
+DcgsResult RunPilotPeelingCapAblation(const Graph& graph,
+                                      const std::vector<NodeId>& seeds,
+                                      const TrackedGraph& tracked_graph,
+                                      const RuntimeOptions& opts,
+                                      std::mt19937_64* rng) {
+  BaselineWorkspace workspace;
+  return RunPilotPeelingCapAblation(
+      graph, seeds, tracked_graph, opts, &workspace, rng);
 }
 
 DcgsResult RunLocalSearchBaseline(const Graph& graph,

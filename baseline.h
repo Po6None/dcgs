@@ -24,6 +24,8 @@ struct BaselineWorkspace {
 
   std::vector<std::uint32_t> seed_mark;
   std::uint32_t seed_epoch = 1;
+  std::vector<std::uint32_t> candidate_mark;
+  std::uint32_t candidate_epoch = 1;
   std::vector<NodeCount> rank_by_node;
   std::vector<NodeId> filtered_active_nodes;
   std::vector<SampleCount> activation_counts;
@@ -150,6 +152,36 @@ DcgsResult RunEdgeCoactPeelingBaseline(const Graph& graph,
                                        const std::vector<NodeId>& seeds,
                                        const RuntimeOptions& opts,
                                        std::mt19937_64* rng);
+
+// RunPilotGreedyAblation reuses the pilot candidate set and then runs the
+// sample-budget greedy add stage restricted to those candidate nodes.
+DcgsResult RunPilotGreedyAblation(const Graph& graph,
+                                  const std::vector<NodeId>& seeds,
+                                  const std::vector<NodeId>& candidate_nodes,
+                                  const RuntimeOptions& opts,
+                                  BaselineWorkspace* workspace,
+                                  std::mt19937_64* rng);
+
+DcgsResult RunPilotGreedyAblation(const Graph& graph,
+                                  const std::vector<NodeId>& seeds,
+                                  const std::vector<NodeId>& candidate_nodes,
+                                  const RuntimeOptions& opts,
+                                  std::mt19937_64* rng);
+
+// RunPilotPeelingCapAblation reuses pilot-discovered tracked candidates and
+// performs fixed-cap sampling followed by one weighted peeling solve.
+DcgsResult RunPilotPeelingCapAblation(const Graph& graph,
+                                      const std::vector<NodeId>& seeds,
+                                      const TrackedGraph& tracked_graph,
+                                      const RuntimeOptions& opts,
+                                      BaselineWorkspace* workspace,
+                                      std::mt19937_64* rng);
+
+DcgsResult RunPilotPeelingCapAblation(const Graph& graph,
+                                      const std::vector<NodeId>& seeds,
+                                      const TrackedGraph& tracked_graph,
+                                      const RuntimeOptions& opts,
+                                      std::mt19937_64* rng);
 
 }  // namespace dcgs
 

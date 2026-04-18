@@ -29,6 +29,8 @@ enum class DiffusionModel {
 // AlgorithmKind selects the top-level experimental pipeline to execute.
 enum class AlgorithmKind {
   kDcgs,
+  kPilotGreedy,
+  kPilotPeelingCap,
   kBestPair,
   kTopKActivationProb,
   kTopKCoactivationDegree,
@@ -44,6 +46,10 @@ inline const char* AlgorithmName(AlgorithmKind algorithm) {
   switch (algorithm) {
     case AlgorithmKind::kDcgs:
       return "dcgs";
+    case AlgorithmKind::kPilotGreedy:
+      return "pilot_greedy";
+    case AlgorithmKind::kPilotPeelingCap:
+      return "pilot_peeling_cap";
     case AlgorithmKind::kBestPair:
       return "best_pair";
     case AlgorithmKind::kTopKActivationProb:

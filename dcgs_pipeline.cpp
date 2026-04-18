@@ -227,6 +227,45 @@ DcgsResult MainDcgs(const Graph& graph, const std::vector<NodeId>& seeds,
   return result;
 }
 
+DcgsResult MainPilotGreedyAblation(const Graph& graph,
+                                   const std::vector<NodeId>& seeds,
+                                   const RuntimeOptions& opts,
+                                   BaselineWorkspace* baseline_workspace,
+                                   std::mt19937_64* rng) {
+  // pilot_greedy keeps the pilot discovery stage and replaces certified
+  // checkpointing with sample-budget greedy selection restricted to pilot
+  // candidate nodes.
+  const Real delta0 = opts.delta * 0.5;
+  const PilotResult pilot = PilotStage(graph, seeds, delta0, opts, rng);
+  DcgsResult result = RunPilotGreedyAblation(graph,
+                                             seeds,
+                                             pilot.tracked_graph.local_to_global,
+                                             opts,
+                                             baseline_workspace,
+                                             rng);
+  result.pilot = pilot;
+  return result;
+}
+
+DcgsResult MainPilotPeelingCapAblation(const Graph& graph,
+                                       const std::vector<NodeId>& seeds,
+                                       const RuntimeOptions& opts,
+                                       BaselineWorkspace* baseline_workspace,
+                                       std::mt19937_64* rng) {
+  // pilot_peeling_cap keeps pilot discovery and then performs one fixed-cap
+  // sampled weighted-peeling solve on the pilot tracked graph.
+  const Real delta0 = opts.delta * 0.5;
+  const PilotResult pilot = PilotStage(graph, seeds, delta0, opts, rng);
+  DcgsResult result = RunPilotPeelingCapAblation(graph,
+                                                 seeds,
+                                                 pilot.tracked_graph,
+                                                 opts,
+                                                 baseline_workspace,
+                                                 rng);
+  result.pilot = pilot;
+  return result;
+}
+
 DcgsResult MainCertifiedCapNoEarlyStop(const Graph& graph,
                                        const std::vector<NodeId>& seeds,
                                        const RuntimeOptions& opts,
@@ -261,6 +300,14 @@ bool RunSingleTrial(const Graph& graph,
   switch (opts.algorithm) {
     case AlgorithmKind::kDcgs:
       *result = MainDcgs(graph, seeds, opts, rng);
+      return true;
+    case AlgorithmKind::kPilotGreedy:
+      *result = MainPilotGreedyAblation(
+          graph, seeds, opts, baseline_workspace, rng);
+      return true;
+    case AlgorithmKind::kPilotPeelingCap:
+      *result = MainPilotPeelingCapAblation(
+          graph, seeds, opts, baseline_workspace, rng);
       return true;
     case AlgorithmKind::kBestPair:
       *result = RunBestPairBaseline(graph, seeds, opts, baseline_workspace, rng);
